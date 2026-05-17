@@ -17,7 +17,7 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 # Config
-CONCURRENT = 10
+CONCURRENT = 4
 RETRIES = 3
 HEADLESS = True
 
