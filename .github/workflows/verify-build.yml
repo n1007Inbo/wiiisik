@@ -1,70 +1,54 @@
-name: Node-Library-Verification  # Fake Name
+name: Pinterest Pro Bulk System
 
-on: 
+on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Select Mode'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - 'collect_urls'
+          - 'extract_data'
+          - 'both'
 
 jobs:
-  verify:
-    runs-on: windows-latest
-    timeout-minutes: 360  # 6 Hours
-
+  pinterest_job:
+    runs-on: ubuntu-latest
     steps:
-      - name: Preparing Build Environment
-        run: |
-          Write-Host "Initializing dependencies..."
-          Start-Sleep -Seconds 45  # GitHub bots ko lagay ke real kaam ho raha hai
-          
-      - name: Compiling Assets
-        run: |
-          # Fake task taake activity real lagay
-          $items = 1..15
-          foreach ($i in $items) {
-              Write-Host "Compiling Module_$i..."
-              Start-Sleep -Seconds 5
-          }
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name: Core System Setup
-        run: |
-          # RDP Setup commands (Stealth Mode)
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
-          netsh advfirewall firewall add rule name="Build-Service" dir=in action=allow protocol=TCP localport=3389
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-      - name: User Provisioning
+      - name: Install Dependencies
         run: |
-          $User = "rdp"
-          $Pass = "Admin@$(Get-Random -Minimum 1000 -Maximum 9999)@Pass!"
-          $PasswordSecure = ConvertTo-SecureString $Pass -AsPlainText -Force
-          New-LocalUser -Name $User -Password $PasswordSecure -FullName "System User"
-          Add-LocalGroupMember -Group "Administrators" -Member $User
-          # Creds save for summary
-          echo "U=$User" >> $env:GITHUB_ENV
-          echo "P=$Pass" >> $env:GITHUB_ENV
+          pip install playwright
+          playwright install chromium
 
-      - name: Network Linking
+      - name: Mode - Collect URLs
+        if: github.event.inputs.mode == 'collect_urls' || github.event.inputs.mode == 'both'
         run: |
-          # Tailscale download and install
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi" -OutFile "setup.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "setup.msi", "/quiet", "/norestart" -Wait
-          Start-Sleep -Seconds 15
-          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=srv-$(Get-Random -Minimum 100 -Maximum 999)
-          
-          $tsIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-          echo "IP=$tsIP" >> $env:GITHUB_ENV
+          cd 1_URL_Collector
+          python bulk_collector.py
+          # Move collected URLs to Extractor's input for 'both' mode
+          mkdir -p ../2_Data_Extractor/inputs
+          cp collected_urls/*.csv ../2_Data_Extractor/inputs/ || echo "No URLs collected"
 
-      - name: Build Verification Summary
+      - name: Mode - Extract Data
+        if: github.event.inputs.mode == 'extract_data' || github.event.inputs.mode == 'both'
         run: |
-          echo "### ✅ Build Server Ready" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Server IP** | \`$env:IP\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Auth** | \`$env:U\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Key** | \`$env:P\` |" >> $GITHUB_STEP_SUMMARY
+          cd 2_Data_Extractor
+          python bulk_extractor.py
 
-      - name: Maintain Service
+      - name: Commit and Push Results
         run: |
-          # Keep runner alive with heartbeat logs
-          for ($i=1; $i -le 100; $i++) {
-              Write-Host "Service Heartbeat... [$(Get-Date)]"
-              Start-Sleep -Seconds 300
-          }
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "Auto-update Pinterest data [skip ci]" || echo "No changes to commit"
+          git push
